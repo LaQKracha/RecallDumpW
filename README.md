@@ -5,7 +5,7 @@ RecallDump is a C program designed to automate the extraction and management of 
 ## ✨ Flow
 
 - 🛠️ Modify directory permissions
-- 📁 Create directories
+- 📁 Create directory
 - 📄 Copy files and directories
 - 🖼️ Rename images to a specific format
 - 🗄️ Process SQLite databases
