@@ -41,8 +41,12 @@ void modify_permissions(const char *path) {
 #ifdef _WIN32
     char command[512];
     snprintf(command, sizeof(command), "icacls \"%s\" /grant %s:(OI)(CI)F /T /C /Q", path, getenv("USERNAME"));
-    system(command);
-    printf("%sPermissions modified for path: %s%s\n", GREEN, path, ENDC);
+    int ret = system(command);
+    if (ret != 0) {
+        printf("%sError modifying permissions. Command returned: %d%s\n", RED, ret, ENDC);
+    } else {
+        printf("%sPermissions modified for path: %s%s\n", GREEN, path, ENDC);
+    }
 #else
     printf("%sPermission modification not supported on this OS.%s\n", YELLOW, ENDC);
 #endif
@@ -88,28 +92,6 @@ void copy_file(const char *source, const char *destination) {
 #endif
 }
 
-void copy_directory(const char *source, const char *destination) {
-#ifdef _WIN32
-    SHFILEOPSTRUCT fileOp = {
-        NULL,
-        FO_COPY,
-        source,
-        destination,
-        FOF_NOCONFIRMMKDIR | FOF_NOCONFIRMATION | FOF_SILENT,
-        FALSE,
-        NULL,
-        NULL
-    };
-    if (SHFileOperation(&fileOp) != 0) {
-        printf("%sFailed to copy directory from %s to %s%s\n", RED, source, destination, ENDC);
-    } else {
-        printf("%sDirectory copied from %s to %s%s\n", GREEN, source, destination, ENDC);
-    }
-#else
-    printf("%sDirectory copy not supported on this OS.%s\n", YELLOW, ENDC);
-#endif
-}
-
 void get_current_time_string(char *buffer, size_t size) {
     time_t now = time(NULL);
     strftime(buffer, size, "%Y-%m-%d-%H-%M", localtime(&now));
@@ -125,7 +107,7 @@ void process_database(const char *db_path) {
     const char *query = "SELECT WindowTitle, TimeStamp, ImageToken FROM WindowCapture";
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) != SQLITE_OK) {
-        printf("%sFailed to prepare SQL statement%s\n", RED, ENDC);
+        printf("%sFailed to prepare SQL statement: %s%s\n", RED, sqlite3_errmsg(db), ENDC);
         sqlite3_close(db);
         return;
     }
@@ -142,37 +124,6 @@ void process_database(const char *db_path) {
     sqlite3_finalize(stmt);
     sqlite3_close(db);
     printf("%sDatabase processing completed.%s\n", GREEN, ENDC);
-}
-
-void rename_images(const char *image_store_path) {
-#ifdef _WIN32
-    char search_pattern[512];
-    snprintf(search_pattern, sizeof(search_pattern), "%s\\*.*", image_store_path);
-    WIN32_FIND_DATA findFileData;
-    HANDLE hFind = FindFirstFile(search_pattern, &findFileData);
-
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            if (!(findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                char old_image_path[512];
-                char new_image_path[512];
-                snprintf(old_image_path, sizeof(old_image_path), "%s\\%s", image_store_path, findFileData.cFileName);
-                snprintf(new_image_path, sizeof(new_image_path), "%s\\%s.jpg", image_store_path, findFileData.cFileName);
-
-                if (!strstr(findFileData.cFileName, ".jpg")) {
-                    if (rename(old_image_path, new_image_path) != 0) {
-                        perror(RED "Failed to rename image file" ENDC);
-                    } else {
-                        printf("%sRenamed image file: %s to %s%s\n", GREEN, old_image_path, new_image_path, ENDC);
-                    }
-                }
-            }
-        } while (FindNextFile(hFind, &findFileData) != 0);
-        FindClose(hFind);
-    }
-#else
-    printf("%sImage renaming not supported on this OS.%s\n", YELLOW, ENDC);
-#endif
 }
 
 void display_help() {
@@ -205,7 +156,7 @@ int main(int argc, char *argv[]) {
     display_banner();
 
     const char *username = getenv("USERNAME");
-    char base_path[256];
+    char base_path[1024];
     snprintf(base_path, sizeof(base_path), "C:\\Users\\%s\\AppData\\Local\\CoreAIPlatform.00\\UKP", username);
 
     struct stat sb;
@@ -216,13 +167,13 @@ int main(int argc, char *argv[]) {
 
     modify_permissions(base_path);
 
-    char guid_folder[256];
+    char guid_folder[1024];
     snprintf(guid_folder, sizeof(guid_folder), "%s\\GUID_FOLDER", base_path);
 
-    char db_path[256];
+    char db_path[1024];
     snprintf(db_path, sizeof(db_path), "%s\\ukg.db", guid_folder);
 
-    char image_store_path[256];
+    char image_store_path[1024];
     snprintf(image_store_path, sizeof(image_store_path), "%s\\ImageStore", guid_folder);
 
     if (stat(db_path, &sb) != 0 || stat(image_store_path, &sb) != 0) {
@@ -232,7 +183,8 @@ int main(int argc, char *argv[]) {
 
     char proceed[4];
     printf("%sWindows Recall feature found. Do you want to proceed with the extraction? (yes/no): %s", CYAN, ENDC);
-    scanf("%3s", proceed);
+    fgets(proceed, sizeof(proceed), stdin);
+    proceed[strcspn(proceed, "\n")] = 0;
     if (strcmp(proceed, "yes") != 0) {
         printf("%sExtraction aborted.%s\n", YELLOW, ENDC);
         return 0;
@@ -240,19 +192,13 @@ int main(int argc, char *argv[]) {
 
     char timestamp[20];
     get_current_time_string(timestamp, sizeof(timestamp));
-    char extraction_folder[256];
+    char extraction_folder[1024];
     snprintf(extraction_folder, sizeof(extraction_folder), "%s\\%s_Recall_Extraction", _getcwd(NULL, 0), timestamp);
     create_directory(extraction_folder);
 
-    char dest_db_path[256];
+    char dest_db_path[1024];
     snprintf(dest_db_path, sizeof(dest_db_path), "%s\\ukg.db", extraction_folder);
     copy_file(db_path, dest_db_path);
-
-    char dest_image_store_path[256];
-    snprintf(dest_image_store_path, sizeof(dest_image_store_path), "%s\\ImageStore", extraction_folder);
-    copy_directory(image_store_path, dest_image_store_path);
-
-    rename_images(dest_image_store_path);
 
     process_database(dest_db_path);
 
